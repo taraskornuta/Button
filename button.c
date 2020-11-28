@@ -32,7 +32,6 @@ static uint8_t btnAmount = 0;
 static btnInstance_t *btnInstance = NULL;
 static portReadCallback_t btnPortRead = NULL;
 
-
 void Button_Init(void *btnInstanceArray, portReadCallback_t callback, const uint8_t amount)
 {
   btnInstance = (btnInstance_t*)btnInstanceArray;
@@ -63,12 +62,12 @@ void Button_Update(void)
     
     if ((BTN_STATE_SHORT == btnNowPressed))                               // Button pressed
     {
-	    if (false == btnInstance[keyNumber].locked)
+      if (false == btnInstance[keyNumber].locked)
       {
         if (++btnInstance[keyNumber].lockCount >= BTN_DEBOUNCE_TIME) // Debounce time
         {
-	    	  btnInstance[keyNumber].locked = true;
-	      }
+          btnInstance[keyNumber].locked = true;
+        }
       }
       
       if ((true == btnInstance[keyNumber].locked) && 
@@ -91,15 +90,14 @@ void Button_Update(void)
       {
         if (0 != btnInstance[keyNumber].lockCount)
         { 
-	        btnInstance[keyNumber].lockCount--;         
-	      }
+          btnInstance[keyNumber].lockCount--;         
+        }
         else
         {
           btnInstance[keyNumber].locked = false;
           if (btnInstance[keyNumber].longCount < BTN_LONG_PRESS_TIME)
           {
             btnInstance[keyNumber].state = BTN_STATE_SHORT;
-            
             if ((BTN_STATE_SHORT == btnInstance[keyNumber].state) && 
                 (0 == btnInstance[keyNumber].lockCount))
             {
@@ -128,7 +126,6 @@ btnState_t Button_EventGet(uint8_t btnCode)
 {
   return btnInstance[btnCode].state;
 }
-
 
 __weak void Button_ShortRelease(uint8_t btnCode)
 {
