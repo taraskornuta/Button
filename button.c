@@ -25,132 +25,117 @@
 #include "button.h"
 #include "stdio.h"
 
-#define BTN_DEBOUNCE_TIME   (BTN_DEBOUNCE_TIME_MS / BTN_PROCESSING_TIME_MS)
-#define BTN_LONG_PRESS_TIME (BTN_LONG_PRESS_TIME_MS / BTN_PROCESSING_TIME_MS)
+#define BTN_PROCESS_DEF        (10)
+#define BTN_DEBOUNCE_DEF       (20)
+#define BTN_LONG_PRESS_DEF     (1000)
 
-static uint8_t btnAmount = 0;
-static btnInstance_t *btnInstance = NULL;
-static portReadCallback_t btnPortRead = NULL;
+#define BTN_DEBOUNCE_TIME      (this->debounce_time_ms / this->process_time_ms)
+#define BTN_LONG_PRESS_TIME(x) (this->instance[x].long_press_time_ms / this->process_time_ms)
 
-void Button_Init(void *btnInstanceArray, portReadCallback_t callback, const uint8_t amount)
+
+static btn_init_t *this = NULL;
+
+int8_t Button_Init(btn_init_t *init, btn_instance_t *instance, uint8_t count)
 {
-  btnInstance = (btnInstance_t*)btnInstanceArray;
-  btnPortRead = callback;
-  btnAmount   = amount;
-  // init internal variables
-  for(uint8_t keyNumber = 0; keyNumber < amount; keyNumber++)
+  if ((NULL == init) || (NULL == instance) || (NULL == init->port_read) || (0 == count))
   {
-    btnInstance[keyNumber].locked = false;
-    btnInstance[keyNumber].longCount = 0;
-    btnInstance[keyNumber].lockCount = 0;
-    btnInstance[keyNumber].prewState = BTN_STATE_NONE;
+    return -1;
   }
+  // link internal objects
+  this = init;
+  this->instance = instance;
+
+ // init internal variables, set defaults
+  this->count = count;
+  this->process_time_ms = (this->process_time_ms) ? this->process_time_ms  : BTN_PROCESS_DEF;
+  this->debounce_time_ms = (this->debounce_time_ms) ? this->debounce_time_ms : BTN_DEBOUNCE_DEF;
+  this->long_press_def_ms = (this->long_press_def_ms) ? this->long_press_def_ms : BTN_LONG_PRESS_DEF; 
+
+  for(uint8_t i = 0; i < count; i++)
+  {
+    this->instance[i].state.locked = 0;
+    this->instance[i].state.prew = BTN_STATE_NONE;
+    this->instance[i].long_count = 0;
+    this->instance[i].lock_count = 0;
+    this->instance[i].long_press_time_ms = (this->instance[i].long_press_time_ms) ? this->instance[i].long_press_time_ms : this->long_press_def_ms;
+  }
+  return 0;
 }
 
-void Button_Update(void)
-{  
-  uint8_t keyNumber = 0;
 
-  while(keyNumber < btnAmount)
+void Button_Update(void)
+{
+  uint8_t key = 0;
+
+  while(key < this->count)
   {
-    btnState_t btnNowPressed = BTN_STATE_NONE;
+    btn_state_t now_pressed = BTN_STATE_NONE;
+    const uint32_t *port = this->instance[key].port;
+    const uint32_t pin = this->instance[key].pin;
+
+    now_pressed = (this->port_read(port, pin) ? BTN_STATE_SHORT : BTN_STATE_NONE);
     
-    if (true ==  btnPortRead(btnInstance[keyNumber].port, btnInstance[keyNumber].pin))  
+    if (BTN_STATE_SHORT == now_pressed)                 // Button pressed
     {
-      btnNowPressed = BTN_STATE_SHORT;
-    }
-    
-    if ((BTN_STATE_SHORT == btnNowPressed))                               // Button pressed
-    {
-      if (false == btnInstance[keyNumber].locked)
+      if (!this->instance[key].state.locked)
       {
-        if (++btnInstance[keyNumber].lockCount >= BTN_DEBOUNCE_TIME) // Debounce time
+        if (++this->instance[key].lock_count >= BTN_DEBOUNCE_TIME) // Debounce time
         {
-          btnInstance[keyNumber].locked = true;
+          this->instance[key].state.locked = 1;
         }
       }
-      
-      if ((true == btnInstance[keyNumber].locked) && 
-          (BTN_STATE_SHORT == btnInstance[keyNumber].prewState))
+
+      if ((this->instance[key].state.locked) && 
+          (BTN_STATE_SHORT == this->instance[key].state.prew))
       {
-        if (++btnInstance[keyNumber].longCount >= BTN_LONG_PRESS_TIME)
+        if (++this->instance[key].long_count >= BTN_LONG_PRESS_TIME(key))
         {
-          btnInstance[keyNumber].state = BTN_STATE_LONG;
-          if (btnInstance[keyNumber].longCount == BTN_LONG_PRESS_TIME)
-          {
-            Button_LongPress(keyNumber);
-          }
+          this->instance[key].state.act = BTN_STATE_LONG;
+          if (NULL != this->long_press) this->long_press(key);
         }
       }
-      btnInstance[keyNumber].prewState = btnNowPressed;     
+      this->instance[key].state.prew = now_pressed;
     }
-    else if (BTN_STATE_NONE == btnNowPressed)                            // Button released
+    else if (BTN_STATE_NONE == now_pressed)            // Button released
     {
-      if (true == btnInstance[keyNumber].locked)
+      if (this->instance[key].state.locked)
       {
-        if (0 != btnInstance[keyNumber].lockCount)
+        if (this->instance[key].lock_count)
         { 
-          btnInstance[keyNumber].lockCount--;         
+          this->instance[key].lock_count--;
         }
         else
         {
-          btnInstance[keyNumber].locked = false;
-          if (btnInstance[keyNumber].longCount < BTN_LONG_PRESS_TIME)
+          this->instance[key].state.locked = 0;
+          if (this->instance[key].long_count < BTN_LONG_PRESS_TIME(key))
           {
-            btnInstance[keyNumber].state = BTN_STATE_SHORT;
-            if ((BTN_STATE_SHORT == btnInstance[keyNumber].state) && 
-                (0 == btnInstance[keyNumber].lockCount))
+            this->instance[key].state.act = BTN_STATE_SHORT;
+            if (0 == this->instance[key].lock_count)
             {
-              Button_ShortRelease(keyNumber);
-            }     
+              if (NULL != this->short_release) this->short_release(key);
+            }
           }
           else
           {
-            if (BTN_STATE_LONG == btnInstance[keyNumber].state)
+            if (BTN_STATE_LONG == this->instance[key].state.act)
             {
-              Button_LongRelease(keyNumber);
+              if (NULL != this->long_release) this->long_release(key);
             }
           }
-        }  
+        }
       }
       else
       {
-        btnInstance[keyNumber].longCount = 0;
+        this->instance[key].long_count = 0;
       }
     }
-    keyNumber++;
+    key++;
   }
-}   
-
-btnState_t Button_EventGet(uint8_t btnCode)
-{
-  return btnInstance[btnCode].state;
 }
 
-__weak void Button_ShortRelease(uint8_t btnCode)
+btn_state_t Button_EventGet(uint8_t key)
 {
-  /* Prevent unused argument(s) compilation warning */
-  (void)btnCode;
-  /* NOTE: This function should not be modified, when the callback is needed,
-           the Button_ShortRelease could be implemented in the user file
-  */
-}
-
-__weak void Button_LongPress(uint8_t btnCode)
-{
-  /* Prevent unused argument(s) compilation warning */
-  (void)btnCode;
-  /* NOTE: This function should not be modified, when the callback is needed,
-           the Button_LongPress could be implemented in the user file
-  */
-}
-
-__weak void Button_LongRelease(uint8_t btnCode)
-{
-  /* Prevent unused argument(s) compilation warning */
-  (void)btnCode;
-  /* NOTE: This function should not be modified, when the callback is needed,
-           the Button_LongRelease could be implemented in the user file
-  */
+  if (key > this->count) return 0;
+  return this->instance[key].state.act;
 }
 

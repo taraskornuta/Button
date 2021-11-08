@@ -27,7 +27,7 @@
 
 /**
   * Name: Button library 
-  * Version: v1.0
+  * Version: v2.0
   * Author: Kornuta Taras
   * E-Mail: taraskornuta@gmail.com
   *
@@ -41,7 +41,8 @@
   * - Short release button callback function
   * - Long press button callback function
   * - Long release button callback function
-  * - Ability to configure debounce time
+  * - Adjustable long press time for each button
+  * - Adjustable debounce time
   * - Up to 255 buttons handling
   *
   * Setup:
@@ -64,23 +65,36 @@
   *
   * int main(void)
   * {
-  *   btnInstance_t keys[4] = 
-  *   {
-  *     BTN_INIT_INSTANCE(GPIOA, GPIO_PIN_0),
-  *     BTN_INIT_INSTANCE(GPIOB, GPIO_PIN_1),
-  *     BTN_INIT_INSTANCE(GPIOC, GPIO_PIN_2),
-  *     BTN_INIT_INSTANCE(GPIOD, GPIO_PIN_3),
+  *   btn_instance_t btn_inst[2] = {
+  *     {
+  *         .port = GPIOA,
+  *         .pin = GPIO_PIN_0,
+  *     },
+  *     {
+  *         .long_press_time_ms = 2050,
+  *         .port = GPIOB,
+  *         .pin = GPIO_PIN_1,
+  *     },
   *   };
-  *   
-  *   Button_Init(keys, (portReadCallback_t)&HAL_GPIO_ReadPin, 4);
+  *
+  *   btn_init_t btn_init = {
+  *     .process_time_ms = 10,
+  *     .debounce_time_ms = 20,
+  *     ..port_read = (port_read_cb_t)&HAL_GPIO_ReadPin,
+  *     .short_release = Button_ShortRelease,
+  *     .long_release = Button_LongRelease,
+  *     .long_press = Button_LongPress,
+  *   };
+  * 
+  *   Button_Init(&btn_init, btn_inst, 2);
   *
   *   while(1)
   *   {
-  *     if (EV_SHORT == Button_EventGet(0)) printf("Button 0 SHORT press\n");
-  *     if (EV_SHORT == Button_EventGet(1)) printf("Button 1 SHORT press\n");
+  *     if (BTN_STATE_SHORT == Button_EventGet(0)) printf("Button 0 SHORT press\n");
+  *     if (BTN_STATE_SHORT == Button_EventGet(1)) printf("Button 1 SHORT press\n");
   *     // ...
-  *     if (EV_LONG == Button_EventGet(0)) printf("Button 0 LONG press\n");
-  *     if (EV_LONG == Button_EventGet(1)) printf("Button 1 LONG press\n");
+  *     if (BTN_STATE_LONG == Button_EventGet(0)) printf("Button 0 LONG press\n");
+  *     if (BTN_STATE_LONG == Button_EventGet(1)) printf("Button 1 LONG press\n");
   *   }
   * }
   *
@@ -106,52 +120,80 @@
   *
 **/
 
-
 #include <stdint.h>
-#include "stdbool.h"
 
-#define BTN_PROCESSING_TIME_MS (10UL)
-#define BTN_DEBOUNCE_TIME_MS   (20UL)	  
-#define BTN_LONG_PRESS_TIME_MS (1000UL)
 
-#define BTN_INIT_INSTANCE(PORT, PIN)\
-  { \
-    .port = (uint32_t *)PORT,\
-    .pin = PIN\
-  }
-
-typedef enum
-{
+typedef enum {
   BTN_STATE_NONE = 0,  // button not pressed
   BTN_STATE_SHORT,     // button short pressed detected
   BTN_STATE_LONG       // button long pressed detected
-}btnState_t;
-
-typedef struct
-{
-  btnState_t state;      // actual button state
-  btnState_t prewState;  // debounce button state
-  bool       locked;     // debounce button lock
-  uint8_t    lockCount;  // debounce time counter
-  uint16_t   longCount;  // long press time counter
-  uint32_t   *port;      // GPIO port
-  uint32_t   pin;        // GPIO pin
-}btnInstance_t;
+} btn_state_t;
 
 /**
-  * @brief portReadCallback_t user provided port read function callback
+  * @brief port_read_cb_t user provided port read function callback
   */
-typedef bool (*portReadCallback_t)(uint32_t *port, uint32_t pin);
+typedef uint8_t (*port_read_cb_t)(const uint32_t *port, const uint32_t pin);
+
+/**
+ * @brief btn_event_cb_t provide button event callback  
+ */
+typedef void (*btn_ev_cb_t)(uint8_t btn_code);
+
+/**
+ * @brief Button instance configuration parameters and operation data
+ * The user provided parameters:
+ * @param port: pointer to GPIO port
+ * @param pin: number of the pin
+ * @param long_press_time_ms: optionaly user can define individual long press time 
+ *       for each button 
+ * Multiple button instances can be created by grouping them into array
+ * btn_instance_t btn_inst[2] = {
+ *  {.port = GPIOA,.pin = 13},
+ *  {.port = GPIOC,.pin = 5} 
+ * };   
+ */
+typedef struct {
+  struct {
+    btn_state_t  act  : 2;     // actual button state
+    btn_state_t  prew : 2;     // previeus button state
+    uint8_t      locked : 1;   // debounce button lock
+  } state;
+
+  uint8_t        lock_count;   // debounce time counter
+  uint16_t       long_count;   // long press time counter
+
+  uint16_t long_press_time_ms; // optional individual button long press time
+  const uint32_t *port;        // GPIO port
+  const uint32_t pin;          // GPIO pin
+} btn_instance_t;
+
+/**
+ * @brief Init struct
+ * 
+ */
+typedef struct {
+  btn_instance_t *instance;     // configured buttons instancess 
+  uint8_t  count;               // configured ammount of used buttons
+  uint8_t  process_time_ms;     // configured button processing time
+  uint8_t  debounce_time_ms;    // configured contacts debounce time
+  uint16_t long_press_def_ms;   // configured default time for long press 
+
+  port_read_cb_t port_read;     // configured callback function to read port 
+  btn_ev_cb_t    short_release; // optional callback function for short release event
+  btn_ev_cb_t    long_release;  // optional callback function for long press release event
+  btn_ev_cb_t    long_press;    // optional callback function for long press detection event
+} btn_init_t;
+
 
 /**
   * @brief Button_Init Buttons initialization function
   * Should be called before all others button module functions 
-  * @param btnInstanceArray: pointer to buttons init instances array
-  * @param callback: GPIO port read function pointer
-  * @param amount: buttons count. Max number of buttons is 255
-  * @retval None
+  * @param init: pointer to init struct
+  * @param instance: pointer to button instance struct
+  * @param count: buttons count. Max number of buttons is 255
+  * @retval -1 - Init error, 0 - Init Ok
   */
-void Button_Init(void *btnInstanceArray, portReadCallback_t callback, const uint8_t amount);
+int8_t Button_Init(btn_init_t *init, btn_instance_t *instance, uint8_t count);
 
 /**
   * @brief Button_Update buttons poll and handling fuction
@@ -166,39 +208,9 @@ void Button_Update(void);
 /**
   * @brief Button_EventGet get the button event status function
   * Used to check status of the particular button
-  * @param btnCode: button code
+  * @param key: button code
   * @retval button status: BTN_STATE_NONE, BTN_STATE_SHORT, BTN_STATE_LONG
   */
-btnState_t Button_EventGet(uint8_t btnCode);
-
-/**
-  * @brief Button_ShortRelease optional user defined Short button release function
-  * The body of this function is implemented as __weak and user can implement 
-  * this function inside his own code with addition logic, to get Short button release event
-  * Used to check Short button release event for particular button code
-  * @param btnCode: button code
-  * @retval None
-  */
-void Button_ShortRelease(uint8_t btnCode);
-
-/**
-  * @brief Button_LongPress optional user defined Long button press function
-  * The body of this function is implemented as __weak and user can reimplement 
-  * this function inside his own code with addition logic, to get Long button press event
-  * Used to check Long button press event for particular button code
-  * @param btnCode: button code
-  * @retval None
-  */
-void Button_LongPress(uint8_t btnCode);
-
-/**
-  * @brief Button_LongRelease optional user defined Long button release function
-  * The body of this function is implemented as __weak and user can reimplement 
-  * this function inside his own code with addition logic, to get Long button release event
-  * Used to check Long button release event for particular button code
-  * @param btnCode: button code
-  * @retval None
-  */
-void Button_LongRelease(uint8_t btnCode);
+btn_state_t Button_EventGet(uint8_t key);
 
 #endif //BUTTON_H
