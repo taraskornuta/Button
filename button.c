@@ -109,9 +109,9 @@ void Button_Update(void)
           this->instance[key].state.locked = 0;
           if (this->instance[key].long_count < BTN_LONG_PRESS_TIME(key))
           {
-            this->instance[key].state.act = BTN_STATE_SHORT;
             if (0 == this->instance[key].lock_count)
             {
+              this->instance[key].state.act = BTN_STATE_SHORT;
               if (NULL != this->short_release) this->short_release(key);
             }
           }
@@ -135,7 +135,7 @@ void Button_Update(void)
 
 btn_state_t Button_EventGet(uint8_t key)
 {
-  if (key > this->count) return 0;
+  if (key >= this->count) return 0;
   return this->instance[key].state.act;
 }
 
